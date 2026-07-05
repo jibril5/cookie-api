@@ -1,21 +1,18 @@
 from flask import Flask, Response, request
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-import subprocess
-import tempfile
-import shutil
-import time
+from playwright.sync_api import sync_playwright
 import os
+import time
 
 app = Flask(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "une-cle-secrete")
 
 PAGE_1 = os.getenv("PAGE_1", "https://5afterdark.mom/")
-PAGE_2 = os.getenv("PAGE_2", "https://5afterdark.mom/video/7e4de128-b10f-dc2b-0542-7590c441630e")
+PAGE_2 = os.getenv(
+    "PAGE_2",
+    "https://5afterdark.mom/video/7e4de128-b10f-dc2b-0542-7590c441630e"
+)
 COOKIE_NAME = os.getenv("COOKIE_NAME", "__illit")
-
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
 
 
@@ -30,60 +27,30 @@ def text_response(text, status=200):
 @app.route("/")
 def home():
     return text_response("Serveur OK")
-    
-@app.route("/test-chrome")
-def test_chrome():
-    user_data_dir = tempfile.mkdtemp(prefix="chrome-user-data-")
-    driver = None
 
-    try:
-        chrome_options = Options()
-        chrome_options.binary_location = "/usr/bin/chromium"
-
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-software-rasterizer")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-
-        driver = webdriver.Chrome(options=chrome_options)
-
-        driver.get("https://example.com")
-        return text_response(driver.title)
-
-    except Exception as e:
-        return text_response(str(e), status=500)
-
-    finally:
-        if driver:
-            driver.quit()
-
-        shutil.rmtree(user_data_dir, ignore_errors=True)
 
 @app.route("/debug")
 def debug():
     try:
-        chromium_version = subprocess.check_output(
-            ["/usr/bin/chromium", "--version"],
-            text=True
-        ).strip()
-    except Exception as e:
-        chromium_version = f"Erreur chromium: {e}"
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox"]
+            )
 
-    try:
-        driver_version = subprocess.check_output(
-            ["/usr/bin/chromedriver", "--version"],
-            text=True
-        ).strip()
-    except Exception as e:
-        driver_version = f"Erreur chromedriver: {e}"
+            page = browser.new_page()
+            page.goto(
+                "https://example.com",
+                wait_until="domcontentloaded",
+                timeout=30000
+            )
+            title = page.title()
+            browser.close()
 
-    return text_response(
-        f"Chromium: {chromium_version}\nChromeDriver: {driver_version}"
-    )
+        return text_response(f"Playwright OK\nTitle: {title}")
+
+    except Exception as e:
+        return text_response(str(e), status=500)
 
 
 @app.route("/cookie", methods=["GET", "OPTIONS"])
@@ -92,52 +59,49 @@ def get_cookie():
         return text_response("")
 
     key = request.args.get("key")
-
     if key != SECRET_KEY:
         return text_response("Unauthorized", status=401)
 
-    user_data_dir = tempfile.mkdtemp(prefix="chrome-user-data-")
-    driver = None
+    browser = None
 
     try:
-        chrome_options = Options()
-        chrome_options.binary_location = "/usr/bin/chromium"
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage"
+                ]
+            )
 
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-setuid-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-software-rasterizer")
-        chrome_options.add_argument("--disable-popup-blocking")
-        chrome_options.add_argument("--disable-notifications")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080}
+            )
 
-        service = Service("/usr/bin/chromedriver")
+            page = context.new_page()
 
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+            page.goto(PAGE_1, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(2)
 
-        driver.get(PAGE_1)
-        time.sleep(1)
+            page.goto(PAGE_2, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(3)
 
-        driver.get(PAGE_2)
-        time.sleep(2)
+            cookies = context.cookies()
 
-        cookies = driver.get_cookies()
+            for cookie in cookies:
+                if cookie.get("name") == COOKIE_NAME:
+                    return text_response(cookie.get("value", ""))
 
-        for cookie in cookies:
-            if cookie.get("name") == COOKIE_NAME:
-                return text_response(cookie.get("value", ""))
+            cookie_names = [cookie.get("name", "") for cookie in cookies]
 
-        return text_response("Cookie introuvable", status=404)
+            return text_response(
+                "Cookie introuvable\nCookies trouvés : " + ", ".join(cookie_names),
+                status=404
+            )
 
     except Exception as e:
         return text_response(str(e), status=500)
 
     finally:
-        if driver:
-            driver.quit()
-
-        shutil.rmtree(user_data_dir, ignore_errors=True)
+        if browser:
+            browser.close()
