@@ -30,7 +30,40 @@ def text_response(text, status=200):
 @app.route("/")
 def home():
     return text_response("Serveur OK")
+    
+@app.route("/test-chrome")
+def test_chrome():
+    user_data_dir = tempfile.mkdtemp(prefix="chrome-user-data-")
+    driver = None
 
+    try:
+        chrome_options = Options()
+        chrome_options.binary_location = "/usr/bin/chromium"
+
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-setuid-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+
+        service = Service("/usr/bin/chromedriver")
+
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.get("https://example.com")
+
+        return text_response(driver.title)
+
+    except Exception as e:
+        return text_response(str(e), status=500)
+
+    finally:
+        if driver:
+            driver.quit()
+
+        shutil.rmtree(user_data_dir, ignore_errors=True)
 
 @app.route("/debug")
 def debug():
