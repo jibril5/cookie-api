@@ -12,6 +12,7 @@ PAGE_2 = os.getenv(
     "PAGE_2",
     "https://5afterdark.mom/video/7e4de128-b10f-dc2b-0542-7590c441630e"
 )
+
 COOKIE_NAME = os.getenv("COOKIE_NAME", "__illit")
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
 
@@ -35,7 +36,7 @@ def debug():
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox"]
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
             )
 
             page = browser.new_page()
@@ -44,6 +45,7 @@ def debug():
                 wait_until="domcontentloaded",
                 timeout=30000
             )
+
             title = page.title()
             browser.close()
 
@@ -61,8 +63,6 @@ def get_cookie():
     key = request.args.get("key")
     if key != SECRET_KEY:
         return text_response("Unauthorized", status=401)
-
-    browser = None
 
     try:
         with sync_playwright() as p:
@@ -90,9 +90,13 @@ def get_cookie():
 
             for cookie in cookies:
                 if cookie.get("name") == COOKIE_NAME:
-                    return text_response(cookie.get("value", ""))
+                    value = cookie.get("value", "")
+                    browser.close()
+                    return text_response(value)
 
             cookie_names = [cookie.get("name", "") for cookie in cookies]
+
+            browser.close()
 
             return text_response(
                 "Cookie introuvable\nCookies trouvés : " + ", ".join(cookie_names),
@@ -101,7 +105,3 @@ def get_cookie():
 
     except Exception as e:
         return text_response(str(e), status=500)
-
-    finally:
-        if browser:
-            browser.close()
